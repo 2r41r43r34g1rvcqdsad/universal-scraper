@@ -219,7 +219,8 @@ def main(args: Optional[list[str]] = None) -> int:
         return 1
 
     if not result.is_success:
-        console.print(f"[bold red]Scraping failed:[/bold red] {result.error}")
+        err_msg = result.error or f"Target returned status {result.status_code} with no readable content."
+        console.print(f"[bold red]Scraping failed:[/bold red] {err_msg}")
         return 1
 
     # Print summary panel

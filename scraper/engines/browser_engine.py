@@ -182,6 +182,17 @@ class BrowserEngine(BaseEngine):
 
             title = meta.get("title") or page_title or ""
 
+            error_msg: Optional[str] = None
+            if "/authwall" in final_url or status_code in (429, 999):
+                error_msg = (
+                    f"Target blocked request (Status {status_code}: Authwall or anti-bot challenge encountered. "
+                    f"For LinkedIn, pass authenticated session cookie: --cookie 'li_at=...')"
+                )
+            elif status_code >= 400:
+                error_msg = f"Target returned HTTP error status {status_code}"
+            elif not (markdown.strip() or plain_text.strip()):
+                error_msg = "Target returned empty content or blank page"
+
             return ScrapeResult(
                 url=final_url,
                 title=title,
@@ -194,6 +205,7 @@ class BrowserEngine(BaseEngine):
                 engine=self.name,
                 status_code=status_code,
                 elapsed_seconds=elapsed,
+                error=error_msg,
             )
 
         except Exception as e:
