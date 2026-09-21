@@ -144,7 +144,10 @@ class HTMLToMarkdownConverter:
         return "".join(parts)
 
     def _render_table(self, table_tag: Tag) -> str:
-        """Converts HTML table into a clean GitHub Markdown table."""
+        """Converts HTML table into a clean GitHub Markdown table, or block text if used for layout."""
+        # Check if table has headers
+        has_th = bool(table_tag.find("th"))
+
         rows = table_tag.find_all("tr")
         if not rows:
             return ""
@@ -158,13 +161,37 @@ class HTMLToMarkdownConverter:
                 " ".join(self._render_children(cell).replace("|", "\\|").split())
                 for cell in cells
             ]
-            table_data.append(row_content)
+            # Strip trailing empty cells
+            while row_content and not row_content[-1].strip():
+                row_content.pop()
+            # Skip rows where all cells are empty
+            if any(cell.strip() for cell in row_content):
+                table_data.append(row_content)
 
         if not table_data:
             return ""
 
         max_cols = max(len(row) for row in table_data)
-        # Pad shorter rows
+
+        # Detect layout tables (lacking <th>, or high column counts with mostly empty spacers, or <= 1 col)
+        is_layout_table = not has_th and (max_cols <= 1 or max_cols > 8)
+        if not is_layout_table and not has_th:
+            # Check ratio of empty cells across table
+            total_cells = sum(len(r) for r in table_data)
+            empty_cells = sum(sum(1 for c in r if not c.strip()) for r in table_data)
+            if total_cells > 0 and (empty_cells / total_cells) > 0.4:
+                is_layout_table = True
+
+        if is_layout_table:
+            # Render cleanly as paragraphs/blocks without pipe borders
+            blocks = []
+            for row in table_data:
+                row_text = " | ".join(c for c in row if c.strip())
+                if row_text:
+                    blocks.append(row_text)
+            return "\n\n" + "\n\n".join(blocks) + "\n\n"
+
+        # Pad shorter rows for true markdown data tables
         for row in table_data:
             while len(row) < max_cols:
                 row.append("")
