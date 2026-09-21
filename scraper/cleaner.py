@@ -64,7 +64,9 @@ def clean_html(
     html: str,
     base_url: str = "",
     preserve_media: bool = True,
-) -> Tuple[BeautifulSoup, List[Dict[str, str]], List[Dict[str, str]]]:
+    target_selector: Optional[str] = None,
+    exclude_selector: Optional[str] = None,
+) -> Tuple[BeautifulSoup | Tag, List[Dict[str, str]], List[Dict[str, str]]]:
     """Cleans raw HTML, isolates the main body, and extracts links and images.
 
     Returns:
@@ -72,8 +74,16 @@ def clean_html(
     """
     soup = BeautifulSoup(html, "html.parser")
 
+    # Optional user-defined exclusions
+    if exclude_selector:
+        try:
+            for excl in soup.select(exclude_selector):
+                excl.decompose()
+        except Exception:
+            pass
+
     # 1. Remove comments
-    for comment in soup.find_all(text=lambda text: isinstance(text, Comment)):
+    for comment in soup.find_all(string=lambda s: isinstance(s, Comment)):
         comment.extract()
 
     # 2. Extract links and images catalog before stripping tags
@@ -133,16 +143,23 @@ def clean_html(
             if tag.name not in ("body", "html", "main", "article"):
                 tag.decompose()
 
-    # 6. Locate the most relevant content block if possible
+    # 6. Locate target selector or the most relevant content block
     content_root = None
-    for selector in MAIN_CONTENT_SELECTORS:
+    if target_selector:
         try:
-            found = soup.select_one(selector)
-            if found and len(found.get_text(strip=True)) > 150:
-                content_root = found
-                break
+            content_root = soup.select_one(target_selector)
         except Exception:
-            continue
+            pass
+
+    if content_root is None:
+        for selector in MAIN_CONTENT_SELECTORS:
+            try:
+                found = soup.select_one(selector)
+                if found and len(found.get_text(strip=True)) > 150:
+                    content_root = found
+                    break
+            except Exception:
+                continue
 
     if content_root is not None:
         clean_soup = content_root

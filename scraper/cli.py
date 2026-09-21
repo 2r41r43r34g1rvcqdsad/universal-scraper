@@ -1,6 +1,7 @@
 """
 Command-Line Interface (CLI) for Universal Scraper.
-Provides a rich interactive terminal interface, direct file exports, and API server launcher.
+Full Jina Reader Parity: URL scraping, search-to-markdown (s.jina.ai),
+cookie/auth support, screenshot capture, and API server launcher.
 """
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -24,20 +25,33 @@ console = Console()
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="universal-scraper",
-        description="Universal Scraper: Convert any website into clean LLM-ready Markdown or JSON.",
+        description="Universal Scraper: Convert any website, PDF, or search query into clean LLM-ready Markdown or JSON.",
     )
     parser.add_argument(
         "url",
         nargs="?",
         default=None,
-        help="Target URL to scrape (e.g., https://example.com)",
+        help="Target URL or local PDF file path to scrape (e.g., https://example.com)",
+    )
+    parser.add_argument(
+        "--search",
+        "-q",
+        type=str,
+        default=None,
+        help="Web search query (s.jina.ai equivalent, e.g., -q 'Python web scraping')",
+    )
+    parser.add_argument(
+        "--scrape-top",
+        type=int,
+        default=0,
+        help="In search mode, scrape the full content of top N search results",
     )
     parser.add_argument(
         "--engine",
         "-e",
-        choices=["auto", "http", "browser"],
+        choices=["auto", "http", "browser", "pdf", "search"],
         default="auto",
-        help="Scraping engine: 'auto' (smart fallback), 'http' (fast), or 'browser' (Playwright JS)",
+        help="Scraping engine: 'auto' (smart fallback), 'http' (fast TLS impersonate), 'browser' (Playwright JS), 'pdf', or 'search'",
     )
     parser.add_argument(
         "--format",
@@ -51,7 +65,39 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         type=str,
         default=None,
-        help="Path to save the scraped output file",
+        help="Path to save the scraped output file (e.g. output.md, data.json)",
+    )
+    parser.add_argument(
+        "--screenshot",
+        type=str,
+        default=None,
+        help="Save full-page screenshot of the rendered page (.png)",
+    )
+    parser.add_argument(
+        "--cookie",
+        type=str,
+        default=None,
+        help="Cookies string for authenticated scraping (e.g., 'li_at=xyz; session=123')",
+    )
+    parser.add_argument(
+        "--header",
+        "-H",
+        action="append",
+        default=[],
+        help="Custom HTTP headers (e.g., -H 'Authorization: Bearer xyz')",
+    )
+    parser.add_argument(
+        "--target-selector",
+        "-t",
+        type=str,
+        default=None,
+        help="CSS selector to target specific content (e.g. 'article', '#main-content')",
+    )
+    parser.add_argument(
+        "--exclude-selector",
+        type=str,
+        default=None,
+        help="CSS selector to exclude specific elements",
     )
     parser.add_argument(
         "--meta",
@@ -88,7 +134,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--timeout",
-        "-t",
         type=float,
         default=None,
         help="Timeout in seconds",
@@ -111,10 +156,11 @@ def main(args: Optional[list[str]] = None) -> int:
         from scraper.server import run_server
         console.print(
             Panel.fit(
-                f"[bold cyan]Universal Scraper API Server[/bold cyan]\n"
+                f"[bold cyan]Universal Scraper API Server (v{__version__})[/bold cyan]\n"
                 f"Running at: [green]http://{opts.host}:{opts.port}[/green]\n\n"
-                f"[dim]Jina-style endpoint: GET http://{opts.host}:{opts.port}/<url>\n"
-                f"Health check:       GET http://{opts.host}:{opts.port}/health[/dim]",
+                f"[dim]• URL Reader:   GET http://{opts.host}:{opts.port}/<url>\n"
+                f"• Web Search:   GET http://{opts.host}:{opts.port}/s/<query>\n"
+                f"• Health check: GET http://{opts.host}:{opts.port}/health[/dim]",
                 title="Universal Scraper",
                 border_style="cyan",
             )
@@ -126,17 +172,51 @@ def main(args: Optional[list[str]] = None) -> int:
             console.print("\n[yellow]Server stopped by user.[/yellow]")
             return 0
 
-    if not opts.url:
+    scraper = UniversalScraper()
+
+    # Search mode (s.jina.ai equivalent)
+    if opts.search:
+        query = opts.search
+        with console.status(f"[bold cyan]Searching the web for '{query}'...[/bold cyan]"):
+            result = scraper.search(query, max_results=10, scrape_top=opts.scrape_top)
+
+    elif opts.url:
+        url = opts.url
+        if not url.startswith(("http://", "https://", "search://")) and not Path(url).exists():
+            url = f"https://{url}"
+
+        # Parse cookies
+        cookie_dict: Optional[Dict[str, str]] = None
+        if opts.cookie:
+            cookie_dict = {}
+            for item in opts.cookie.split(";"):
+                if "=" in item:
+                    k, v = item.strip().split("=", 1)
+                    cookie_dict[k.strip()] = v.strip()
+
+        # Parse headers
+        custom_headers: Optional[Dict[str, str]] = None
+        if opts.header:
+            custom_headers = {}
+            for h in opts.header:
+                if ":" in h:
+                    hk, hv = h.split(":", 1)
+                    custom_headers[hk.strip()] = hv.strip()
+
+        with console.status(f"[bold cyan]Scraping {url} with engine '{opts.engine}'...[/bold cyan]"):
+            result = scraper.scrape(
+                url,
+                engine=opts.engine,
+                timeout=opts.timeout,
+                cookies=cookie_dict,
+                custom_headers=custom_headers,
+                screenshot_path=opts.screenshot,
+                target_selector=opts.target_selector,
+                exclude_selector=opts.exclude_selector,
+            )
+    else:
         parser.print_help()
         return 1
-
-    url = opts.url
-    if not url.startswith(("http://", "https://")):
-        url = f"https://{url}"
-
-    with console.status(f"[bold cyan]Scraping {url} with engine '{opts.engine}'...[/bold cyan]"):
-        scraper = UniversalScraper()
-        result = scraper.scrape(url, engine=opts.engine, timeout=opts.timeout)
 
     if not result.is_success:
         console.print(f"[bold red]Scraping failed:[/bold red] {result.error}")
@@ -146,16 +226,20 @@ def main(args: Optional[list[str]] = None) -> int:
     console.print(
         Panel(
             f"[bold green]Title:[/bold green] {result.title or '(No title)'}\n"
-            f"[bold green]URL:[/bold green] {result.url}\n"
+            f"[bold green]Target:[/bold green] {result.url}\n"
             f"[bold green]Engine:[/bold green] {result.engine.upper()} | "
             f"[bold green]Status:[/bold green] {result.status_code} | "
             f"[bold green]Time:[/bold green] {result.elapsed_seconds:.2f}s | "
-            f"[bold green]Links:[/bold green] {len(result.links)} | "
-            f"[bold green]Images:[/bold green] {len(result.images)}",
+            f"[bold green]Estimated Tokens:[/bold green] ~{result.estimated_tokens:,}\n"
+            f"[bold green]Links Extracted:[/bold green] {len(result.links)} | "
+            f"[bold green]Images Extracted:[/bold green] {len(result.images)}",
             title="[bold cyan]Scrape Summary[/bold cyan]",
             border_style="green",
         )
     )
+
+    if opts.screenshot:
+        console.print(f"[bold green]Screenshot saved to:[/bold green] {Path(opts.screenshot).resolve()}")
 
     # Optional metadata display
     if opts.meta and result.metadata:

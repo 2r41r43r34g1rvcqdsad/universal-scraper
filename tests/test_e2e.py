@@ -63,9 +63,26 @@ def test_fastapi_server_endpoints():
     assert "links" in res_dict
     print("✓ GET /<url>?format=json: OK")
 
+    # 4. Jina-style GET /s/<query> endpoint (search-to-markdown)
+    r_search = client.get("/s/python+programming")
+    assert r_search.status_code == 200
+    assert "Web Search Results" in r_search.text
+    print("✓ GET /s/<query> (Search to Markdown): OK")
+
+
+def test_search_engine_live():
+    print("\n--- Testing Web Search-to-Scrape Engine ---")
+    scraper = UniversalScraper()
+    res = scraper.search("Python programming language", max_results=3)
+    assert res.is_success, f"Search failed: {res.error}"
+    assert len(res.links) >= 1
+    assert "Web Search Results" in res.markdown
+    print(f"✓ Search Engine returned {len(res.links)} results with ~{res.estimated_tokens} tokens")
+
 
 if __name__ == "__main__":
     test_http_engine_live()
     test_browser_engine_live()
+    test_search_engine_live()
     test_fastapi_server_endpoints()
     print("\n ALL END-TO-END TESTS PASSED PERFECTLY!")

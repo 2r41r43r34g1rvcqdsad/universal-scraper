@@ -32,6 +32,12 @@ class ScrapeResult:
         has_content = bool(self.markdown.strip() or self.text.strip())
         return self.error is None and is_ok_status and has_content
 
+    @property
+    def estimated_tokens(self) -> int:
+        """Estimates token count for LLMs (~4 characters per token)."""
+        content = self.markdown or self.text
+        return max(1, len(content) // 4) if content else 0
+
     def to_dict(self, include_html: bool = False) -> Dict[str, Any]:
         """Convert result to a dictionary for API/JSON export."""
         data = {
@@ -40,6 +46,7 @@ class ScrapeResult:
             "engine": self.engine,
             "status_code": self.status_code,
             "elapsed_seconds": round(self.elapsed_seconds, 3),
+            "estimated_tokens": self.estimated_tokens,
             "metadata": self.metadata,
             "links": self.links,
             "images": self.images,

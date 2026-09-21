@@ -47,6 +47,9 @@ class HttpEngine(BaseEngine):
         url: str,
         timeout: Optional[float] = None,
         custom_headers: Optional[Dict[str, str]] = None,
+        cookies: Optional[Dict[str, str]] = None,
+        target_selector: Optional[str] = None,
+        exclude_selector: Optional[str] = None,
         **kwargs: Any,
     ) -> ScrapeResult:
         start_time = time.perf_counter()
@@ -65,7 +68,7 @@ class HttpEngine(BaseEngine):
             try:
                 from curl_cffi.requests import AsyncSession
                 async with AsyncSession(impersonate="chrome124", verify=False) as session:
-                    resp = await session.get(url, headers=req_headers, timeout=effective_timeout)
+                    resp = await session.get(url, headers=req_headers, cookies=cookies, timeout=effective_timeout)
                     raw_html = resp.text
                     status_code = resp.status_code
                     final_url = str(resp.url)
@@ -76,6 +79,7 @@ class HttpEngine(BaseEngine):
                     timeout=effective_timeout,
                     follow_redirects=True,
                     verify=False,
+                    cookies=cookies,
                 ) as client:
                     response = await client.get(url)
                     raw_html = response.text
@@ -89,7 +93,12 @@ class HttpEngine(BaseEngine):
             meta = extract_metadata(full_soup, base_url=final_url)
 
             # Clean and isolate content
-            cleaned_dom, links, images = clean_html(raw_html, base_url=final_url)
+            cleaned_dom, links, images = clean_html(
+                raw_html,
+                base_url=final_url,
+                target_selector=target_selector,
+                exclude_selector=exclude_selector,
+            )
 
             # Convert to markdown
             converter = HTMLToMarkdownConverter(base_url=final_url)

@@ -37,6 +37,10 @@ class BrowserEngine(BaseEngine):
         timeout: Optional[float] = None,
         scroll_page: bool = True,
         wait_seconds: float = 1.0,
+        cookies: Optional[Dict[str, str] | List[Dict[str, Any]]] = None,
+        screenshot_path: Optional[str] = None,
+        target_selector: Optional[str] = None,
+        exclude_selector: Optional[str] = None,
         **kwargs: Any,
     ) -> ScrapeResult:
         start_time = time.perf_counter()
@@ -63,6 +67,19 @@ class BrowserEngine(BaseEngine):
                     locale="en-US",
                     timezone_id="America/New_York",
                 )
+
+                # Add custom cookies (e.g. for bypassing authwalls or logged-in scraping)
+                if cookies:
+                    from urllib.parse import urlparse
+                    domain = urlparse(url).hostname or ""
+                    cookie_list = []
+                    if isinstance(cookies, dict):
+                        for c_name, c_val in cookies.items():
+                            cookie_list.append({"name": c_name, "value": c_val, "domain": domain, "path": "/"})
+                    elif isinstance(cookies, list):
+                        cookie_list = cookies
+                    if cookie_list:
+                        await context.add_cookies(cookie_list)
 
                 # Advanced Anti-Detect / Stealth Script Injection (based on Jina Reader minimal-stealth.js)
                 await context.add_init_script(
@@ -132,6 +149,10 @@ class BrowserEngine(BaseEngine):
                     if wait_seconds > 0:
                         await page.wait_for_timeout(int(wait_seconds * 1000))
 
+                # Optional full-page screenshot
+                if screenshot_path:
+                    await page.screenshot(path=screenshot_path, full_page=True)
+
                 final_url = page.url
                 raw_html = await page.content()
                 page_title = await page.title()
@@ -146,8 +167,13 @@ class BrowserEngine(BaseEngine):
             full_soup = BeautifulSoup(raw_html, "html.parser")
             meta = extract_metadata(full_soup, base_url=final_url)
 
-            # Clean and isolate content
-            cleaned_dom, links, images = clean_html(raw_html, base_url=final_url)
+            # Clean and isolate content with optional target/exclude selectors
+            cleaned_dom, links, images = clean_html(
+                raw_html,
+                base_url=final_url,
+                target_selector=target_selector,
+                exclude_selector=exclude_selector,
+            )
 
             # Convert to markdown
             converter = HTMLToMarkdownConverter(base_url=final_url)
