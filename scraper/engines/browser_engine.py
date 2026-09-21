@@ -67,23 +67,13 @@ class BrowserEngine(BaseEngine):
 
                 browser = None
                 if user_data_dir:
-                    try:
-                        context = await p.chromium.launch_persistent_context(
-                            user_data_dir=user_data_dir,
-                            channel="chrome",
-                            headless=use_headless,
-                            args=launch_args,
-                            viewport={"width": 1920, "height": 1080},
-                            locale="en-US",
-                        )
-                    except Exception:
-                        context = await p.chromium.launch_persistent_context(
-                            user_data_dir=user_data_dir,
-                            headless=use_headless,
-                            args=launch_args,
-                            viewport={"width": 1920, "height": 1080},
-                            locale="en-US",
-                        )
+                    context = await p.chromium.launch_persistent_context(
+                        user_data_dir=user_data_dir,
+                        headless=use_headless,
+                        args=launch_args,
+                        viewport={"width": 1920, "height": 1080},
+                        locale="en-US",
+                    )
                 else:
                     browser = await p.chromium.launch(
                         headless=use_headless,
@@ -158,39 +148,57 @@ class BrowserEngine(BaseEngine):
                 else:
                     page = await context.new_page()
 
-                # Navigate to page
+                # Navigate to page with error and redirect resilience
+                response = None
                 try:
                     response = await page.goto(
                         url,
                         timeout=effective_timeout,
-                        wait_until=self.wait_until,  # type: ignore
+                        wait_until="commit",
                     )
-                except Exception:
-                    # Fallback to domcontentloaded if networkidle times out on active sockets
-                    response = await page.goto(
-                        url,
-                        timeout=effective_timeout,
-                        wait_until="domcontentloaded",
-                    )
+                    try:
+                        await page.wait_for_load_state("domcontentloaded", timeout=10000)
+                    except Exception:
+                        pass
+                except Exception as goto_err:
+                    err_text = str(goto_err).lower()
+                    if "interrupted" in err_text or "chromewebdata" in err_text:
+                        import asyncio
+                        await asyncio.sleep(1.5)
+                        try:
+                            response = await page.goto(url, timeout=effective_timeout, wait_until="commit")
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            response = await page.goto(
+                                url,
+                                timeout=effective_timeout,
+                                wait_until="domcontentloaded",
+                            )
+                        except Exception:
+                            pass
 
                 # In interactive mode, check if authwall/login was hit and wait for user
                 if interactive or not use_headless:
+                    from rich.console import Console
+                    c = Console()
                     current_url = page.url
                     needs_login = (
                         "/authwall" in current_url
                         or "/login" in current_url
                         or "/checkpoint" in current_url
+                        or "chromewebdata" in current_url
                         or (response and response.status in (429, 999))
                     )
                     if needs_login:
-                        from rich.console import Console
-                        c = Console()
-                        c.print("[bold yellow]🔔 Action Required:[/bold yellow] Please complete sign-in in the opened Chrome window.")
-                        c.print("[bold cyan]Universal Scraper will automatically capture your profile once loaded (up to 120s)...[/bold cyan]")
+                        c.print("\n[bold yellow]🔔 Action Required:[/bold yellow] Browser window is open.")
+                        c.print("[bold cyan]Please sign in to LinkedIn in the opened browser window.[/bold cyan]")
+                        c.print("[dim]The scraper will automatically detect when your profile loads and save it immediately (waiting up to 180s)...[/dim]")
                         try:
                             await page.wait_for_function(
-                                "() => !window.location.href.includes('/authwall') && !window.location.href.includes('/login') && !window.location.href.includes('/checkpoint') && !document.title.toLowerCase().includes('sign up') && !document.title.toLowerCase().includes('sign in')",
-                                timeout=120000,
+                                "() => window.location.href.includes('/in/') && !window.location.href.includes('/authwall') && !window.location.href.includes('/login') && !window.location.href.includes('/checkpoint') && !window.location.href.includes('chromewebdata')",
+                                timeout=180000,
                             )
                             await page.wait_for_timeout(3000)
                         except Exception:
