@@ -100,6 +100,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="CSS selector to exclude specific elements",
     )
     parser.add_argument(
+        "--interactive",
+        "-i",
+        action="store_true",
+        help="Interactive mode: opens visible Chrome to easily complete logins, captchas, or authwalls",
+    )
+    parser.add_argument(
+        "--headful",
+        action="store_true",
+        help="Run browser in visible (non-headless) window",
+    )
+    parser.add_argument(
         "--meta",
         action="store_true",
         help="Display extracted metadata (OpenGraph, Title, Author, Date)",
@@ -203,6 +214,9 @@ def main(args: Optional[list[str]] = None) -> int:
                     hk, hv = h.split(":", 1)
                     custom_headers[hk.strip()] = hv.strip()
 
+        if opts.interactive:
+            opts.engine = "browser"
+
         with console.status(f"[bold cyan]Scraping {url} with engine '{opts.engine}'...[/bold cyan]"):
             result = scraper.scrape(
                 url,
@@ -213,6 +227,8 @@ def main(args: Optional[list[str]] = None) -> int:
                 screenshot_path=opts.screenshot,
                 target_selector=opts.target_selector,
                 exclude_selector=opts.exclude_selector,
+                interactive=opts.interactive,
+                headful=opts.headful,
             )
     else:
         parser.print_help()

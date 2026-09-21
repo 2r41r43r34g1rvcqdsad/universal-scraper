@@ -6,6 +6,7 @@ Renders client-side JavaScript, Single-Page Apps (React, Vue, Angular), and dyna
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
@@ -46,27 +47,57 @@ class BrowserEngine(BaseEngine):
         start_time = time.perf_counter()
         effective_timeout = (timeout or self.timeout) * 1000  # Playwright uses ms
 
+        interactive: bool = kwargs.get("interactive", False)
+        headful: bool = kwargs.get("headful", False)
+        use_headless = False if (interactive or headful) else self.headless
+
+        user_data_dir = kwargs.get("user_data_dir")
+        default_profile_dir = Path.home() / ".universal_scraper" / "browser_profile"
+        if interactive or headful or default_profile_dir.exists():
+            user_data_dir = user_data_dir or str(default_profile_dir)
+            Path(user_data_dir).mkdir(parents=True, exist_ok=True)
+
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=self.headless,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-web-security",
-                    ],
-                )
+                launch_args = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                ]
 
-                context = await browser.new_context(
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-                    ),
-                    locale="en-US",
-                    timezone_id="America/New_York",
-                )
+                browser = None
+                if user_data_dir:
+                    try:
+                        context = await p.chromium.launch_persistent_context(
+                            user_data_dir=user_data_dir,
+                            channel="chrome",
+                            headless=use_headless,
+                            args=launch_args,
+                            viewport={"width": 1920, "height": 1080},
+                            locale="en-US",
+                        )
+                    except Exception:
+                        context = await p.chromium.launch_persistent_context(
+                            user_data_dir=user_data_dir,
+                            headless=use_headless,
+                            args=launch_args,
+                            viewport={"width": 1920, "height": 1080},
+                            locale="en-US",
+                        )
+                else:
+                    browser = await p.chromium.launch(
+                        headless=use_headless,
+                        args=launch_args + ["--disable-web-security"],
+                    )
+                    context = await browser.new_context(
+                        viewport={"width": 1920, "height": 1080},
+                        user_agent=(
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                        ),
+                        locale="en-US",
+                        timezone_id="America/New_York",
+                    )
 
                 # Add custom cookies (e.g. for bypassing authwalls or logged-in scraping)
                 if cookies:
@@ -122,7 +153,10 @@ class BrowserEngine(BaseEngine):
                     """
                 )
 
-                page = await context.new_page()
+                if len(context.pages) > 0:
+                    page = context.pages[0]
+                else:
+                    page = await context.new_page()
 
                 # Navigate to page
                 try:
@@ -138,6 +172,29 @@ class BrowserEngine(BaseEngine):
                         timeout=effective_timeout,
                         wait_until="domcontentloaded",
                     )
+
+                # In interactive mode, check if authwall/login was hit and wait for user
+                if interactive or not use_headless:
+                    current_url = page.url
+                    needs_login = (
+                        "/authwall" in current_url
+                        or "/login" in current_url
+                        or "/checkpoint" in current_url
+                        or (response and response.status in (429, 999))
+                    )
+                    if needs_login:
+                        from rich.console import Console
+                        c = Console()
+                        c.print("[bold yellow]🔔 Action Required:[/bold yellow] Please complete sign-in in the opened Chrome window.")
+                        c.print("[bold cyan]Universal Scraper will automatically capture your profile once loaded (up to 120s)...[/bold cyan]")
+                        try:
+                            await page.wait_for_function(
+                                "() => !window.location.href.includes('/authwall') && !window.location.href.includes('/login') && !window.location.href.includes('/checkpoint') && !document.title.toLowerCase().includes('sign up') && !document.title.toLowerCase().includes('sign in')",
+                                timeout=120000,
+                            )
+                            await page.wait_for_timeout(3000)
+                        except Exception:
+                            pass
 
                 # Optional scroll to trigger dynamic lazy loading
                 if scroll_page:
@@ -159,7 +216,8 @@ class BrowserEngine(BaseEngine):
                 status_code = response.status if response else 200
 
                 await context.close()
-                await browser.close()
+                if browser:
+                    await browser.close()
 
             elapsed = time.perf_counter() - start_time
 
