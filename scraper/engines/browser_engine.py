@@ -139,6 +139,8 @@ class BrowserEngine(BaseEngine):
             )
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             elapsed = time.perf_counter() - start_time
             return ScrapeResult(
                 url=url,

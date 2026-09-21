@@ -54,15 +54,26 @@ class UniversalScraper:
         )
 
         # Conditions that trigger browser fallback:
-        # 1. Blocked / anti-bot status (403, 401, 503, connection error)
-        # 2. Content is nearly empty (often indicates client-side JS app e.g. <div id="root"></div>)
-        is_blocked = http_result.status_code in (401, 403, 429, 503) or not http_result.is_success
-        is_empty_spa = len(http_result.markdown.strip()) < 80 and "javascript" in http_result.html.lower()
+        # 1. Blocked / anti-bot status (401, 403, 429, 503, 999, connection error)
+        # 2. Content is nearly empty (< 80 chars)
+        is_blocked = (
+            http_result.status_code in (401, 403, 429, 503, 999)
+            or http_result.status_code >= 400
+            or not http_result.is_success
+        )
+        is_empty_spa = len(http_result.markdown.strip()) < 80
 
         if is_blocked or is_empty_spa:
             browser_result = await self.browser_engine.scrape(url, timeout=timeout, **kwargs)
             if browser_result.is_success:
                 return browser_result
+            # If browser also encountered a challenge or authwall, set a clear error message
+            if not browser_result.is_success and not browser_result.error:
+                if browser_result.status_code in (429, 999):
+                    browser_result.error = f"Target blocked request (Status {browser_result.status_code}: Anti-bot or Authwall/login required)"
+                elif not browser_result.markdown.strip():
+                    browser_result.error = f"Target returned no readable content (Status {browser_result.status_code}: likely login required or client redirection)"
+            return browser_result
 
         return http_result
 

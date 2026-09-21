@@ -28,7 +28,9 @@ class ScrapeResult:
 
     @property
     def is_success(self) -> bool:
-        return self.error is None and bool(self.markdown or self.text or self.html)
+        is_ok_status = 200 <= self.status_code < 400
+        has_content = bool(self.markdown.strip() or self.text.strip())
+        return self.error is None and is_ok_status and has_content
 
     def to_dict(self, include_html: bool = False) -> Dict[str, Any]:
         """Convert result to a dictionary for API/JSON export."""
