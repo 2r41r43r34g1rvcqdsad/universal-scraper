@@ -1,0 +1,28 @@
+[project]
+name = "universal-scraper"
+version = "1.0.0"
+description = "Universal Web Scraper & Reader - Converts any webpage into LLM-ready clean Markdown and JSON"
+readme = "README.md"
+authors = [
+    { name = "Developer" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "beautifulsoup4>=4.12.0",
+    "fastapi>=0.110.0",
+    "httpx>=0.27.0",
+    "playwright>=1.40.0",
+    "rich>=13.0.0",
+    "uvicorn>=0.28.0",
+]
+
+[project.scripts]
+universal-scraper = "scraper.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scraper"]
