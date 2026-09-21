@@ -57,34 +57,49 @@ class HttpEngine(BaseEngine):
         effective_timeout = timeout or self.timeout
 
         try:
-            async with httpx.AsyncClient(
-                headers=req_headers,
-                timeout=effective_timeout,
-                follow_redirects=True,
-                verify=False,
-            ) as client:
-                response = await client.get(url)
+            raw_html = ""
+            status_code = 200
+            final_url = url
+
+            # Attempt 1: curl-impersonate (bypasses Cloudflare / Akamai TLS fingerprinting, identical to Jina Reader)
+            try:
+                from curl_cffi.requests import AsyncSession
+                async with AsyncSession(impersonate="chrome124", verify=False) as session:
+                    resp = await session.get(url, headers=req_headers, timeout=effective_timeout)
+                    raw_html = resp.text
+                    status_code = resp.status_code
+                    final_url = str(resp.url)
+            except Exception:
+                # Fallback to standard httpx
+                async with httpx.AsyncClient(
+                    headers=req_headers,
+                    timeout=effective_timeout,
+                    follow_redirects=True,
+                    verify=False,
+                ) as client:
+                    response = await client.get(url)
+                    raw_html = response.text
+                    status_code = response.status_code
+                    final_url = str(response.url)
 
             elapsed = time.perf_counter() - start_time
-            raw_html = response.text
-            status_code = response.status_code
 
             # Parse full document for metadata
             full_soup = BeautifulSoup(raw_html, "html.parser")
-            meta = extract_metadata(full_soup, base_url=str(response.url))
+            meta = extract_metadata(full_soup, base_url=final_url)
 
             # Clean and isolate content
-            cleaned_dom, links, images = clean_html(raw_html, base_url=str(response.url))
+            cleaned_dom, links, images = clean_html(raw_html, base_url=final_url)
 
             # Convert to markdown
-            converter = HTMLToMarkdownConverter(base_url=str(response.url))
+            converter = HTMLToMarkdownConverter(base_url=final_url)
             markdown = converter.convert(cleaned_dom)
             plain_text = cleaned_dom.get_text(separator="\n", strip=True)
 
             title = meta.get("title") or (full_soup.title.string.strip() if full_soup.title and full_soup.title.string else "")
 
             return ScrapeResult(
-                url=str(response.url),
+                url=final_url,
                 title=title,
                 markdown=markdown,
                 text=plain_text,

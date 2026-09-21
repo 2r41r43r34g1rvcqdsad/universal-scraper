@@ -64,12 +64,44 @@ class BrowserEngine(BaseEngine):
                     timezone_id="America/New_York",
                 )
 
-                # Anti-detect script injection
+                # Advanced Anti-Detect / Stealth Script Injection (based on Jina Reader minimal-stealth.js)
                 await context.add_init_script(
                     """
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
+                    // 1. Hide webdriver flag
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+                    // 2. Mock standard window.chrome
+                    window.chrome = {
+                        runtime: {},
+                        loadTimes: function() {},
+                        csi: function() {},
+                        app: {}
+                    };
+
+                    // 3. Mock languages and plugins
+                    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+
+                    // 4. WebGL vendor/renderer spoofing (evades Cloudflare / Datadome SwiftShader detection)
+                    const getParameterProxy = (target, ctx, args) => {
+                        const param = (args || [])[0];
+                        if (param === 37445) return 'Intel Inc.';
+                        if (param === 37446) return 'Intel Iris OpenGL Engine';
+                        return Reflect.apply(target, ctx, args);
+                    };
+
+                    if ('WebGLRenderingContext' in window) {
+                        const origGetParam = WebGLRenderingContext.prototype.getParameter;
+                        WebGLRenderingContext.prototype.getParameter = function(...args) {
+                            return getParameterProxy(origGetParam, this, args);
+                        };
+                    }
+                    if ('WebGL2RenderingContext' in window) {
+                        const origGetParam2 = WebGL2RenderingContext.prototype.getParameter;
+                        WebGL2RenderingContext.prototype.getParameter = function(...args) {
+                            return getParameterProxy(origGetParam2, this, args);
+                        };
+                    }
                     """
                 )
 
