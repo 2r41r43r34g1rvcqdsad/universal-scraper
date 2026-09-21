@@ -29,8 +29,8 @@ def extract_metadata(soup: BeautifulSoup, base_url: str = "") -> Dict[str, Any]:
 
     # Language
     html_tag = soup.find("html")
-    if html_tag and html_tag.get("lang"):
-        metadata["language"] = str(html_tag.get("lang")).strip()
+    if html_tag and html_tag.attrs and html_tag.attrs.get("lang"):
+        metadata["language"] = str(html_tag.attrs.get("lang")).strip()
 
     # Title
     title_tag = soup.find("title")
@@ -39,8 +39,10 @@ def extract_metadata(soup: BeautifulSoup, base_url: str = "") -> Dict[str, Any]:
 
     # Meta tags extraction
     for meta in soup.find_all("meta"):
-        name = (meta.get("name") or meta.get("property") or "").strip().lower()
-        content = (meta.get("content") or "").strip()
+        if not meta or meta.attrs is None:
+            continue
+        name = (meta.attrs.get("name") or meta.attrs.get("property") or "").strip().lower()
+        content = (meta.attrs.get("content") or "").strip()
 
         if not name or not content:
             continue

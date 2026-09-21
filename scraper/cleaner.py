@@ -80,7 +80,9 @@ def clean_html(
     links: List[Dict[str, str]] = []
     seen_hrefs: Set[str] = set()
     for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
+        if not a or a.attrs is None:
+            continue
+        href = (a.attrs.get("href") or "").strip()
         if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
             continue
         abs_href = urljoin(base_url, href)
@@ -92,11 +94,13 @@ def clean_html(
     images: List[Dict[str, str]] = []
     seen_imgs: Set[str] = set()
     for img in soup.find_all("img"):
-        src = img.get("src") or img.get("data-src") or img.get("data-original-src")
+        if not img or img.attrs is None:
+            continue
+        src = img.attrs.get("src") or img.attrs.get("data-src") or img.attrs.get("data-original-src")
         if not src:
             continue
         abs_src = urljoin(base_url, src.strip())
-        alt = (img.get("alt") or "").strip()
+        alt = (img.attrs.get("alt") or "").strip()
         if abs_src not in seen_imgs:
             seen_imgs.add(abs_src)
             images.append({"alt": alt, "url": abs_src})
@@ -117,11 +121,14 @@ def clean_html(
         tag.decompose()
 
     # 5. Remove elements matching noise patterns in id or class
-    for tag in soup.find_all(True):
-        tag_id = tag.get("id", "")
-        tag_classes = " ".join(tag.get("class", [])) if isinstance(tag.get("class"), list) else tag.get("class", "")
-        identifier = f"{tag_id} {tag_classes}"
-        if identifier and NOISE_PATTERN.search(identifier):
+    for tag in list(soup.find_all(True)):
+        if not tag or tag.attrs is None:
+            continue
+        tag_id = tag.attrs.get("id", "") or ""
+        tag_classes = tag.attrs.get("class", [])
+        classes_str = " ".join(tag_classes) if isinstance(tag_classes, list) else str(tag_classes or "")
+        identifier = f"{tag_id} {classes_str}"
+        if identifier.strip() and NOISE_PATTERN.search(identifier):
             # Don't remove if it's the body or main tag
             if tag.name not in ("body", "html", "main", "article"):
                 tag.decompose()
@@ -138,10 +145,10 @@ def clean_html(
             continue
 
     if content_root is not None:
-        new_soup = BeautifulSoup("<div></div>", "html.parser")
-        new_soup.div.append(content_root)
-        clean_soup = new_soup.div
+        clean_soup = content_root
+    elif soup.body is not None:
+        clean_soup = soup.body
     else:
-        clean_soup = soup.body if soup.body else soup
+        clean_soup = soup
 
     return clean_soup, links, images
